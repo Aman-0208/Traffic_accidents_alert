@@ -1,14 +1,13 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import mongoose from 'mongoose';
+import { createClient } from '@supabase/supabase-js';
 import { Server as SocketIo } from 'socket.io';
 import http from 'http';
 
 // Import routes
 import streamRoutes from './routes/streams.js';
 import alertRoutes from './routes/alerts.js';
-import authRoutes from './routes/auth.js';
 import mlRoutes from './routes/ml.js';
 
 // Import ML service
@@ -33,13 +32,17 @@ app.use(cors({
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// MongoDB connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/traffic-surveillance', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('✅ Connected to MongoDB'))
-.catch(err => console.error('❌ MongoDB connection error:', err));
+// Initialize Supabase client
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error('Missing Supabase credentials');
+  process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+console.log('Connected to Supabase');
 
 // Initialize ML Service
 const mlService = new MLService();
@@ -63,15 +66,15 @@ io.on('connection', (socket) => {
   });
 });
 
-// Make io available to routes
+// Make io and supabase available to routes
 app.use((req, res, next) => {
   req.io = io;
   req.mlService = mlService;
+  req.supabase = supabase;
   next();
 });
 
 // Routes
-app.use('/api/auth', authRoutes);
 app.use('/api/streams', streamRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/ml', mlRoutes);
@@ -108,4 +111,4 @@ server.listen(PORT, () => {
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-export { app, io };
+export { app, io, supabase };

@@ -1,16 +1,19 @@
 import express from 'express';
-import Stream from '../models/Stream.js';
-import Alert from '../models/Alert.js';
 
 const router = express.Router();
 
 // Get all streams
 router.get('/', async (req, res) => {
   try {
-    const streams = await Stream.find().sort({ createdAt: -1 });
-    res.json(streams);
+    const { data: streams, error } = await req.supabase
+      .from('streams')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+    res.json(streams || []);
   } catch (error) {
-    console.error('❌ Error fetching streams:', error);
+    console.error('Error fetching streams:', error);
     res.status(500).json({ error: 'Failed to fetch streams' });
   }
 });
@@ -18,13 +21,19 @@ router.get('/', async (req, res) => {
 // Get single stream
 router.get('/:id', async (req, res) => {
   try {
-    const stream = await Stream.findById(req.params.id);
+    const { data: stream, error } = await req.supabase
+      .from('streams')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) throw error;
     if (!stream) {
       return res.status(404).json({ error: 'Stream not found' });
     }
     res.json(stream);
   } catch (error) {
-    console.error('❌ Error fetching stream:', error);
+    console.error('Error fetching stream:', error);
     res.status(500).json({ error: 'Failed to fetch stream' });
   }
 });
@@ -33,26 +42,32 @@ router.get('/:id', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { url, location, coordinates } = req.body;
-    
+
     if (!url || !location) {
       return res.status(400).json({ error: 'URL and location are required' });
     }
 
-    const stream = new Stream({
+    const streamData = {
       url: url.trim(),
       location: location.trim(),
-      coordinates: coordinates || {},
+      latitude: coordinates?.latitude || null,
+      longitude: coordinates?.longitude || null,
       status: 'inactive'
-    });
+    };
 
-    await stream.save();
-    
-    // Emit to all connected clients
+    const { data: stream, error } = await req.supabase
+      .from('streams')
+      .insert([streamData])
+      .select()
+      .single();
+
+    if (error) throw error;
+
     req.io.emit('stream-created', stream);
-    
+
     res.status(201).json(stream);
   } catch (error) {
-    console.error('❌ Error creating stream:', error);
+    console.error('Error creating stream:', error);
     res.status(500).json({ error: 'Failed to create stream' });
   }
 });
@@ -61,28 +76,31 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { url, location, coordinates, status } = req.body;
-    
-    const stream = await Stream.findByIdAndUpdate(
-      req.params.id,
-      {
-        ...(url && { url: url.trim() }),
-        ...(location && { location: location.trim() }),
-        ...(coordinates && { coordinates }),
-        ...(status && { status })
-      },
-      { new: true, runValidators: true }
-    );
 
+    const updateData = {};
+    if (url) updateData.url = url.trim();
+    if (location) updateData.location = location.trim();
+    if (coordinates?.latitude) updateData.latitude = coordinates.latitude;
+    if (coordinates?.longitude) updateData.longitude = coordinates.longitude;
+    if (status) updateData.status = status;
+
+    const { data: stream, error } = await req.supabase
+      .from('streams')
+      .update(updateData)
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
     if (!stream) {
       return res.status(404).json({ error: 'Stream not found' });
     }
 
-    // Emit to all connected clients
     req.io.emit('stream-updated', stream);
-    
+
     res.json(stream);
   } catch (error) {
-    console.error('❌ Error updating stream:', error);
+    console.error('Error updating stream:', error);
     res.status(500).json({ error: 'Failed to update stream' });
   }
 });
@@ -90,21 +108,18 @@ router.put('/:id', async (req, res) => {
 // Delete stream
 router.delete('/:id', async (req, res) => {
   try {
-    const stream = await Stream.findByIdAndDelete(req.params.id);
-    
-    if (!stream) {
-      return res.status(404).json({ error: 'Stream not found' });
-    }
+    const { error: deleteError } = await req.supabase
+      .from('streams')
+      .delete()
+      .eq('id', req.params.id);
 
-    // Delete associated alerts
-    await Alert.deleteMany({ streamId: req.params.id });
-    
-    // Emit to all connected clients
+    if (deleteError) throw deleteError;
+
     req.io.emit('stream-deleted', { id: req.params.id });
-    
+
     res.json({ message: 'Stream deleted successfully' });
   } catch (error) {
-    console.error('❌ Error deleting stream:', error);
+    console.error('Error deleting stream:', error);
     res.status(500).json({ error: 'Failed to delete stream' });
   }
 });
@@ -112,27 +127,37 @@ router.delete('/:id', async (req, res) => {
 // Start monitoring stream
 router.post('/:id/start', async (req, res) => {
   try {
-    const stream = await Stream.findById(req.params.id);
-    
+    const { data: stream, error } = await req.supabase
+      .from('streams')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) throw error;
     if (!stream) {
       return res.status(404).json({ error: 'Stream not found' });
     }
 
-    // Update stream status
-    stream.status = 'active';
-    stream.isProcessing = true;
-    stream.lastProcessed = new Date();
-    await stream.save();
+    const { data: updatedStream, error: updateError } = await req.supabase
+      .from('streams')
+      .update({
+        status: 'active',
+        is_processing: true,
+        last_processed: new Date().toISOString()
+      })
+      .eq('id', req.params.id)
+      .select()
+      .single();
 
-    // Start ML processing
-    processStreamWithML(stream, req.mlService, req.io);
-    
-    // Emit to all connected clients
-    req.io.emit('stream-started', stream);
-    
-    res.json({ message: 'Stream monitoring started', stream });
+    if (updateError) throw updateError;
+
+    processStreamWithML(updatedStream, req.mlService, req.io, req.supabase);
+
+    req.io.emit('stream-started', updatedStream);
+
+    res.json({ message: 'Stream monitoring started', stream: updatedStream });
   } catch (error) {
-    console.error('❌ Error starting stream:', error);
+    console.error('Error starting stream:', error);
     res.status(500).json({ error: 'Failed to start stream monitoring' });
   }
 });
@@ -140,87 +165,98 @@ router.post('/:id/start', async (req, res) => {
 // Stop monitoring stream
 router.post('/:id/stop', async (req, res) => {
   try {
-    const stream = await Stream.findByIdAndUpdate(
-      req.params.id,
-      { 
+    const { data: stream, error } = await req.supabase
+      .from('streams')
+      .update({
         status: 'inactive',
-        isProcessing: false
-      },
-      { new: true }
-    );
+        is_processing: false
+      })
+      .eq('id', req.params.id)
+      .select()
+      .single();
 
+    if (error) throw error;
     if (!stream) {
       return res.status(404).json({ error: 'Stream not found' });
     }
-    
-    // Emit to all connected clients
+
     req.io.emit('stream-stopped', stream);
-    
+
     res.json({ message: 'Stream monitoring stopped', stream });
   } catch (error) {
-    console.error('❌ Error stopping stream:', error);
+    console.error('Error stopping stream:', error);
     res.status(500).json({ error: 'Failed to stop stream monitoring' });
   }
 });
 
 // Process stream with ML
-async function processStreamWithML(stream, mlService, io) {
+async function processStreamWithML(stream, mlService, io, supabase) {
   const processInterval = setInterval(async () => {
     try {
-      // Check if stream is still active
-      const currentStream = await Stream.findById(stream._id);
-      if (!currentStream || !currentStream.isProcessing) {
+      const { data: currentStream, error } = await supabase
+        .from('streams')
+        .select('*')
+        .eq('id', stream.id)
+        .single();
+
+      if (error || !currentStream || !currentStream.is_processing) {
         clearInterval(processInterval);
         return;
       }
 
-      // Process video stream
       const result = await mlService.processVideoStream(stream.url);
-      
-      // Update last processed time
-      currentStream.lastProcessed = new Date();
-      await currentStream.save();
 
-      // Emit processing result
-      io.to(`stream-${stream._id}`).emit('detection-result', {
-        streamId: stream._id,
+      await supabase
+        .from('streams')
+        .update({ last_processed: new Date().toISOString() })
+        .eq('id', stream.id);
+
+      io.to(`stream-${stream.id}`).emit('detection-result', {
+        streamId: stream.id,
         result
       });
 
-      // If accident detected, create alert
       if (result.accidentDetected) {
-        await handleAccidentDetection(stream, result, io);
+        await handleAccidentDetection(stream, result, io, supabase);
       }
 
     } catch (error) {
-      console.error('❌ ML processing error:', error);
-      
-      // Update stream status to error
-      await Stream.findByIdAndUpdate(stream._id, { 
-        status: 'error',
-        isProcessing: false 
-      });
-      
+      console.error('ML processing error:', error);
+
+      await supabase
+        .from('streams')
+        .update({
+          status: 'error',
+          is_processing: false
+        })
+        .eq('id', stream.id);
+
       clearInterval(processInterval);
     }
-  }, 5000); // Process every 5 seconds
+  }, 5000);
 }
 
 // Handle accident detection
-async function handleAccidentDetection(stream, detectionResult, io) {
+async function handleAccidentDetection(stream, detectionResult, io, supabase) {
   try {
-    // Update stream status
-    stream.status = 'alert';
-    stream.accidentCount += 1;
-    await stream.save();
+    const { data: updatedStream } = await supabase
+      .from('streams')
+      .update({
+        status: 'alert',
+        accident_count: stream.accident_count + 1
+      })
+      .eq('id', stream.id)
+      .select()
+      .single();
 
-    // Create alert
-    const alert = new Alert({
-      streamId: stream._id,
+    const alertData = {
+      stream_id: stream.id,
       location: stream.location,
-      coordinates: stream.coordinates,
+      latitude: stream.latitude,
+      longitude: stream.longitude,
       severity: detectionResult.confidence > 0.9 ? 'critical' : 'high',
-      detectionData: {
+      confidence: detectionResult.confidence,
+      detection_data: {
         confidence: detectionResult.confidence,
         boundingBoxes: detectionResult.detections.map(d => ({
           x: d.boundingBox.x,
@@ -232,21 +268,24 @@ async function handleAccidentDetection(stream, detectionResult, io) {
         })),
         frameTimestamp: detectionResult.timestamp
       }
-    });
+    };
 
-    await alert.save();
+    const { data: alert } = await supabase
+      .from('alerts')
+      .insert([alertData])
+      .select()
+      .single();
 
-    // Emit accident alert
     io.emit('accident-detected', {
       alert,
-      stream,
+      stream: updatedStream,
       detectionResult
     });
 
-    console.log(`🚨 Accident detected at ${stream.location}`);
+    console.log(`Accident detected at ${stream.location}`);
 
   } catch (error) {
-    console.error('❌ Error handling accident detection:', error);
+    console.error('Error handling accident detection:', error);
   }
 }
 

@@ -4,13 +4,13 @@ import { X, Plus, MapPin, Link } from 'lucide-react';
 interface AddStreamModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onAddStream: (url: string, location: string) => void;
+  onAdd: (url: string, location: string, coordinates?: any) => void;
 }
 
 export const AddStreamModal: React.FC<AddStreamModalProps> = ({
   isOpen,
   onClose,
-  onAddStream
+  onAdd
 }) => {
   const [url, setUrl] = useState('');
   const [location, setLocation] = useState('');
@@ -21,8 +21,7 @@ export const AddStreamModal: React.FC<AddStreamModalProps> = ({
     if (!url.trim() || !location.trim()) return;
 
     setIsSubmitting(true);
-    await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API call
-    onAddStream(url.trim(), location.trim());
+    await onAdd(url.trim(), location.trim());
     setUrl('');
     setLocation('');
     setIsSubmitting(false);

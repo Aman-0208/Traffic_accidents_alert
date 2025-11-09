@@ -1,5 +1,4 @@
 import express from 'express';
-import Alert from '../models/Alert.js';
 
 const router = express.Router();
 
@@ -7,18 +6,22 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     const { status, severity, limit = 50 } = req.query;
-    
-    let query = {};
-    if (status) query.status = status;
-    if (severity) query.severity = severity;
-    
-    const alerts = await Alert.find(query)
-      .sort({ createdAt: -1 })
+
+    let query = req.supabase
+      .from('alerts')
+      .select('*')
+      .order('created_at', { ascending: false })
       .limit(parseInt(limit));
-    
-    res.json(alerts);
+
+    if (status) query = query.eq('status', status);
+    if (severity) query = query.eq('severity', severity);
+
+    const { data: alerts, error } = await query;
+
+    if (error) throw error;
+    res.json(alerts || []);
   } catch (error) {
-    console.error('❌ Error fetching alerts:', error);
+    console.error('Error fetching alerts:', error);
     res.status(500).json({ error: 'Failed to fetch alerts' });
   }
 });
@@ -26,13 +29,19 @@ router.get('/', async (req, res) => {
 // Get single alert
 router.get('/:id', async (req, res) => {
   try {
-    const alert = await Alert.findById(req.params.id);
+    const { data: alert, error } = await req.supabase
+      .from('alerts')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error) throw error;
     if (!alert) {
       return res.status(404).json({ error: 'Alert not found' });
     }
     res.json(alert);
   } catch (error) {
-    console.error('❌ Error fetching alert:', error);
+    console.error('Error fetching alert:', error);
     res.status(500).json({ error: 'Failed to fetch alert' });
   }
 });
@@ -41,27 +50,28 @@ router.get('/:id', async (req, res) => {
 router.put('/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
-    
+
     if (!status) {
       return res.status(400).json({ error: 'Status is required' });
     }
 
-    const alert = await Alert.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true }
-    );
+    const { data: alert, error } = await req.supabase
+      .from('alerts')
+      .update({ status })
+      .eq('id', req.params.id)
+      .select()
+      .single();
 
+    if (error) throw error;
     if (!alert) {
       return res.status(404).json({ error: 'Alert not found' });
     }
 
-    // Emit to all connected clients
     req.io.emit('alert-status-updated', alert);
-    
+
     res.json(alert);
   } catch (error) {
-    console.error('❌ Error updating alert status:', error);
+    console.error('Error updating alert status:', error);
     res.status(500).json({ error: 'Failed to update alert status' });
   }
 });
@@ -69,23 +79,26 @@ router.put('/:id/status', async (req, res) => {
 // Send alert notification
 router.post('/:id/send', async (req, res) => {
   try {
-    const alert = await Alert.findById(req.params.id);
-    
+    const { data: alert, error } = await req.supabase
+      .from('alerts')
+      .update({
+        status: 'sent',
+        sent_at: new Date().toISOString()
+      })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+
+    if (error) throw error;
     if (!alert) {
       return res.status(404).json({ error: 'Alert not found' });
     }
 
-    // Update alert status to sent
-    alert.status = 'sent';
-    alert.sentAt = new Date();
-    await alert.save();
-
-    // Emit to all connected clients
     req.io.emit('alert-sent', alert);
-    
+
     res.json({ message: 'Alert sent successfully', alert });
   } catch (error) {
-    console.error('❌ Error sending alert:', error);
+    console.error('Error sending alert:', error);
     res.status(500).json({ error: 'Failed to send alert' });
   }
 });
@@ -93,25 +106,26 @@ router.post('/:id/send', async (req, res) => {
 // Acknowledge alert
 router.post('/:id/acknowledge', async (req, res) => {
   try {
-    const alert = await Alert.findByIdAndUpdate(
-      req.params.id,
-      { 
+    const { data: alert, error } = await req.supabase
+      .from('alerts')
+      .update({
         status: 'acknowledged',
-        acknowledgedAt: new Date()
-      },
-      { new: true }
-    );
+        acknowledged_at: new Date().toISOString()
+      })
+      .eq('id', req.params.id)
+      .select()
+      .single();
 
+    if (error) throw error;
     if (!alert) {
       return res.status(404).json({ error: 'Alert not found' });
     }
 
-    // Emit to all connected clients
     req.io.emit('alert-acknowledged', { alertId: req.params.id });
-    
+
     res.json({ message: 'Alert acknowledged', alert });
   } catch (error) {
-    console.error('❌ Error acknowledging alert:', error);
+    console.error('Error acknowledging alert:', error);
     res.status(500).json({ error: 'Failed to acknowledge alert' });
   }
 });
@@ -119,50 +133,32 @@ router.post('/:id/acknowledge', async (req, res) => {
 // Get alert statistics
 router.get('/stats/summary', async (req, res) => {
   try {
-    const stats = await Alert.aggregate([
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+    const { data: alerts, error } = await req.supabase
+      .from('alerts')
+      .select('status, severity');
+
+    if (error) throw error;
 
     const summary = {
-      total: 0,
+      total: alerts.length,
       pending: 0,
       sent: 0,
       acknowledged: 0,
+      resolved: 0,
       critical: 0,
       high: 0,
       medium: 0,
       low: 0
     };
 
-    stats.forEach(stat => {
-      summary[stat._id] = stat.count;
-      summary.total += stat.count;
-    });
-
-    // Get severity stats
-    const severityStats = await Alert.aggregate([
-      {
-        $group: {
-          _id: '$severity',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
-
-    severityStats.forEach(stat => {
-      if (summary.hasOwnProperty(stat._id)) {
-        summary[stat._id] = stat.count;
-      }
+    alerts.forEach(alert => {
+      if (alert.status) summary[alert.status] = (summary[alert.status] || 0) + 1;
+      if (alert.severity) summary[alert.severity] = (summary[alert.severity] || 0) + 1;
     });
 
     res.json(summary);
   } catch (error) {
-    console.error('❌ Error fetching alert stats:', error);
+    console.error('Error fetching alert stats:', error);
     res.status(500).json({ error: 'Failed to fetch alert statistics' });
   }
 });

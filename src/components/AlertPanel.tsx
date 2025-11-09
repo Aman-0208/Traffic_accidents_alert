@@ -2,12 +2,12 @@ import React, { useState } from 'react';
 import { AlertTriangle, Send, Clock, MapPin, Activity } from 'lucide-react';
 
 interface Alert {
-  _id: string;
+  id: string;
   location: string;
   severity: 'low' | 'medium' | 'high' | 'critical';
   status: 'pending' | 'sent' | 'acknowledged' | 'resolved';
   type: 'accident' | 'traffic_jam' | 'weather' | 'system';
-  createdAt: string;
+  created_at: string;
   description?: string;
 }
 
@@ -43,6 +43,10 @@ export const AlertPanel: React.FC<AlertPanelProps> = ({ alerts, onSendAlert }) =
     return new Date(dateString).toLocaleTimeString();
   };
 
+  const getCreatedAt = (alert: Alert) => {
+    return alert.created_at || (alert as any).createdAt || new Date().toISOString();
+  };
+
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6">
       <div className="flex items-center justify-between mb-6">
@@ -67,9 +71,9 @@ export const AlertPanel: React.FC<AlertPanelProps> = ({ alerts, onSendAlert }) =
         ) : (
           alerts.map((alert) => (
             <div
-              key={alert._id}
+              key={alert.id}
               className={`p-4 rounded-lg border cursor-pointer transition-all hover:shadow-md ${
-                selectedAlert?._id === alert._id
+                selectedAlert?.id === alert.id
                   ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
                   : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
               }`}
@@ -106,15 +110,15 @@ export const AlertPanel: React.FC<AlertPanelProps> = ({ alerts, onSendAlert }) =
                   
                   <div className="flex items-center text-xs text-gray-400 dark:text-gray-500">
                     <Clock className="h-3 w-3 mr-1" />
-                    {formatTime(alert.createdAt)}
+                    {formatTime(getCreatedAt(alert))}
                   </div>
                 </div>
-                
+
                 {alert.status === 'pending' && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onSendAlert(alert._id);
+                      onSendAlert(alert.id);
                     }}
                     className="ml-2 p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                     title="Send Alert"
@@ -136,7 +140,7 @@ export const AlertPanel: React.FC<AlertPanelProps> = ({ alerts, onSendAlert }) =
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-500 dark:text-gray-400">ID:</span>
-              <span className="text-gray-900 dark:text-white font-mono">{selectedAlert._id}</span>
+              <span className="text-gray-900 dark:text-white font-mono">{selectedAlert.id}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-500 dark:text-gray-400">Type:</span>
@@ -157,7 +161,7 @@ export const AlertPanel: React.FC<AlertPanelProps> = ({ alerts, onSendAlert }) =
             <div className="flex justify-between">
               <span className="text-gray-500 dark:text-gray-400">Created:</span>
               <span className="text-gray-900 dark:text-white">
-                {new Date(selectedAlert.createdAt).toLocaleString()}
+                {new Date(getCreatedAt(selectedAlert)).toLocaleString()}
               </span>
             </div>
           </div>

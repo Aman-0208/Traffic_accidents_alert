@@ -11,17 +11,17 @@ import { apiService } from '../services/api';
 import { socketService } from '../services/socketService';
 
 interface Stream {
-  _id: string;
+  id: string;
   url: string;
   location: string;
   status: 'active' | 'inactive' | 'alert';
 }
 
 interface Alert {
-  _id: string;
+  id: string;
   location: string;
   timestamp: Date;
-  streamId: string;
+  stream_id: string;
   status: 'pending' | 'sent' | 'acknowledged';
 }
 
@@ -94,16 +94,16 @@ export const Dashboard: React.FC = () => {
     });
 
     socketService.onStreamUpdated((stream) => {
-      setStreams(prev => prev.map(s => s._id === stream._id ? stream : s));
+      setStreams(prev => prev.map(s => s.id === stream.id ? stream : s));
     });
 
     socketService.onStreamDeleted((data) => {
-      setStreams(prev => prev.filter(s => s._id !== data.id));
+      setStreams(prev => prev.filter(s => s.id !== data.id));
     });
 
     // Alert events
     socketService.onAlertSent((alert) => {
-      setAlerts(prev => prev.map(a => a._id === alert._id ? alert : a));
+      setAlerts(prev => prev.map(a => a.id === alert.id ? alert : a));
     });
 
     socketService.onAccidentDetected((data) => {
@@ -126,8 +126,8 @@ export const Dashboard: React.FC = () => {
   const handleStartStream = useCallback(async (streamId: string) => {
     try {
       await apiService.startStream(streamId);
-      setStreams(prev => prev.map(s => 
-        s._id === streamId ? { ...s, status: 'active' as const } : s
+      setStreams(prev => prev.map(s =>
+        s.id === streamId ? { ...s, status: 'active' as const } : s
       ));
     } catch (error) {
       console.error('Failed to start stream:', error);
@@ -137,8 +137,8 @@ export const Dashboard: React.FC = () => {
   const handleStopStream = useCallback(async (streamId: string) => {
     try {
       await apiService.stopStream(streamId);
-      setStreams(prev => prev.map(s => 
-        s._id === streamId ? { ...s, status: 'inactive' as const } : s
+      setStreams(prev => prev.map(s =>
+        s.id === streamId ? { ...s, status: 'inactive' as const } : s
       ));
     } catch (error) {
       console.error('Failed to stop stream:', error);
@@ -148,8 +148,8 @@ export const Dashboard: React.FC = () => {
   const handleSendAlert = useCallback(async (alertId: string) => {
     try {
       await apiService.sendAlert(alertId);
-      setAlerts(prev => prev.map(a => 
-        a._id === alertId ? { ...a, status: 'sent' as const } : a
+      setAlerts(prev => prev.map(a =>
+        a.id === alertId ? { ...a, status: 'sent' as const } : a
       ));
     } catch (error) {
       console.error('Failed to send alert:', error);
@@ -286,13 +286,13 @@ export const Dashboard: React.FC = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {streams.map((stream) => (
                   <VideoStreamCard
-                    key={stream._id}
-                    id={stream._id}
+                    key={stream.id}
+                    id={stream.id}
                     url={stream.url}
                     location={stream.location}
                     status={stream.status}
-                    onStart={() => handleStartStream(stream._id)}
-                    onStop={() => handleStopStream(stream._id)}
+                    onStart={() => handleStartStream(stream.id)}
+                    onStop={() => handleStopStream(stream.id)}
                   />
                 ))}
               </div>
