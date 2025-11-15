@@ -236,46 +236,53 @@ async function processStreamWithML(stream, mlService, io, supabase) {
   }, 5000);
 }
 
-// Handle accident detection - create pending alert for approval
+// Handle accident detection
 async function handleAccidentDetection(stream, detectionResult, io, supabase) {
   try {
-    const detectionData = {
-      accidents: detectionResult.accidents,
-      vehicles: detectionResult.frameAnalysis,
-      frameTimestamp: detectionResult.timestamp,
-      location: stream.location,
-      latitude: stream.latitude,
-      longitude: stream.longitude,
-      severity: detectionResult.confidence > 0.85 ? 'critical' : detectionResult.confidence > 0.75 ? 'high' : 'medium',
-      boundingBoxes: detectionResult.detections.map(d => ({
-        x: d.boundingBox.x,
-        y: d.boundingBox.y,
-        width: d.boundingBox.width,
-        height: d.boundingBox.height,
-        class: d.class,
-        confidence: d.confidence
-      }))
-    };
-
-    const { data: pendingAlert } = await supabase
-      .from('pending_alerts')
-      .insert([{
-        stream_id: stream.id,
-        detection_data: detectionData,
-        frame_timestamp: detectionResult.timestamp.toISOString(),
-        confidence: detectionResult.confidence,
-        status: 'pending'
-      }])
+    const { data: updatedStream } = await supabase
+      .from('streams')
+      .update({
+        status: 'alert',
+        accident_count: stream.accident_count + 1
+      })
+      .eq('id', stream.id)
       .select()
       .single();
 
-    io.emit('accident-detected-pending', {
-      pendingAlert,
-      stream,
+    const alertData = {
+      stream_id: stream.id,
+      location: stream.location,
+      latitude: stream.latitude,
+      longitude: stream.longitude,
+      severity: detectionResult.confidence > 0.9 ? 'critical' : 'high',
+      confidence: detectionResult.confidence,
+      detection_data: {
+        confidence: detectionResult.confidence,
+        boundingBoxes: detectionResult.detections.map(d => ({
+          x: d.boundingBox.x,
+          y: d.boundingBox.y,
+          width: d.boundingBox.width,
+          height: d.boundingBox.height,
+          class: d.class,
+          confidence: d.confidence
+        })),
+        frameTimestamp: detectionResult.timestamp
+      }
+    };
+
+    const { data: alert } = await supabase
+      .from('alerts')
+      .insert([alertData])
+      .select()
+      .single();
+
+    io.emit('accident-detected', {
+      alert,
+      stream: updatedStream,
       detectionResult
     });
 
-    console.log(`Accident detected at ${stream.location} - awaiting approval`);
+    console.log(`Accident detected at ${stream.location}`);
 
   } catch (error) {
     console.error('Error handling accident detection:', error);
