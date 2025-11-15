@@ -7,6 +7,7 @@ import { AddStreamModal } from './AddStreamModal';
 import { MapView } from './MapView';
 import { AlertPanel } from './AlertPanel';
 import { MLAnalytics } from './MLAnalytics';
+import { AccidentApprovalModal } from './AccidentApprovalModal';
 import { apiService } from '../services/api';
 import { socketService } from '../services/socketService';
 
@@ -32,6 +33,8 @@ export const Dashboard: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'streams' | 'analytics'>('streams');
+  const [pendingAccident, setPendingAccident] = useState<any>(null);
+  const [isApprovingAccident, setIsApprovingAccident] = useState(false);
 
   // Initialize data and socket connection
   useEffect(() => {
@@ -109,6 +112,19 @@ export const Dashboard: React.FC = () => {
     socketService.onAccidentDetected((data) => {
       setAlerts(prev => [data.alert, ...prev]);
     });
+
+    socketService.on('accident-detected-pending', (data) => {
+      setPendingAccident(data);
+    });
+
+    socketService.on('alert-approved', (data) => {
+      setAlerts(prev => [data.finalAlert, ...prev]);
+      setPendingAccident(null);
+    });
+
+    socketService.on('alert-rejected', () => {
+      setPendingAccident(null);
+    });
   };
 
   const handleAddStream = useCallback(async (url: string, location: string, coordinates?: any) => {
@@ -155,6 +171,49 @@ export const Dashboard: React.FC = () => {
       console.error('Failed to send alert:', error);
     }
   }, []);
+
+  const handleApproveAccident = useCallback(async () => {
+    if (!pendingAccident) return;
+
+    setIsApprovingAccident(true);
+    try {
+      await fetch(`/api/pending-alerts/${pendingAccident.pendingAlert.id}/approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          approved_by: 'user'
+        })
+      });
+    } catch (error) {
+      console.error('Failed to approve accident:', error);
+    } finally {
+      setIsApprovingAccident(false);
+    }
+  }, [pendingAccident]);
+
+  const handleRejectAccident = useCallback(async () => {
+    if (!pendingAccident) return;
+
+    setIsApprovingAccident(true);
+    try {
+      await fetch(`/api/pending-alerts/${pendingAccident.pendingAlert.id}/reject`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          rejection_reason: 'User rejected',
+          approved_by: 'user'
+        })
+      });
+    } catch (error) {
+      console.error('Failed to reject accident:', error);
+    } finally {
+      setIsApprovingAccident(false);
+    }
+  }, [pendingAccident]);
 
   if (isLoading) {
     return (
@@ -330,6 +389,24 @@ export const Dashboard: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onAdd={handleAddStream}
+      />
+
+      <AccidentApprovalModal
+        isOpen={!!pendingAccident}
+        detectionData={pendingAccident?.detectionResult?.frameAnalysis ? {
+          accidents: pendingAccident.detectionResult.accidents || [],
+          vehicles: pendingAccident.detectionResult.frameAnalysis,
+          frameTimestamp: pendingAccident.detectionResult.timestamp,
+          location: pendingAccident.stream?.location || 'Unknown',
+          latitude: pendingAccident.stream?.latitude,
+          longitude: pendingAccident.stream?.longitude,
+          severity: pendingAccident.detectionResult.confidence > 0.85 ? 'critical' : pendingAccident.detectionResult.confidence > 0.75 ? 'high' : 'medium',
+          boundingBoxes: pendingAccident.detectionResult.detections || []
+        } : null}
+        confidence={pendingAccident?.detectionResult?.confidence || 0}
+        onApprove={handleApproveAccident}
+        onReject={handleRejectAccident}
+        isLoading={isApprovingAccident}
       />
     </div>
   );

@@ -236,53 +236,46 @@ async function processStreamWithML(stream, mlService, io, supabase) {
   }, 5000);
 }
 
-// Handle accident detection
+// Handle accident detection - create pending alert for approval
 async function handleAccidentDetection(stream, detectionResult, io, supabase) {
   try {
-    const { data: updatedStream } = await supabase
-      .from('streams')
-      .update({
-        status: 'alert',
-        accident_count: stream.accident_count + 1
-      })
-      .eq('id', stream.id)
-      .select()
-      .single();
-
-    const alertData = {
-      stream_id: stream.id,
+    const detectionData = {
+      accidents: detectionResult.accidents,
+      vehicles: detectionResult.frameAnalysis,
+      frameTimestamp: detectionResult.timestamp,
       location: stream.location,
       latitude: stream.latitude,
       longitude: stream.longitude,
-      severity: detectionResult.confidence > 0.9 ? 'critical' : 'high',
-      confidence: detectionResult.confidence,
-      detection_data: {
-        confidence: detectionResult.confidence,
-        boundingBoxes: detectionResult.detections.map(d => ({
-          x: d.boundingBox.x,
-          y: d.boundingBox.y,
-          width: d.boundingBox.width,
-          height: d.boundingBox.height,
-          class: d.class,
-          confidence: d.confidence
-        })),
-        frameTimestamp: detectionResult.timestamp
-      }
+      severity: detectionResult.confidence > 0.85 ? 'critical' : detectionResult.confidence > 0.75 ? 'high' : 'medium',
+      boundingBoxes: detectionResult.detections.map(d => ({
+        x: d.boundingBox.x,
+        y: d.boundingBox.y,
+        width: d.boundingBox.width,
+        height: d.boundingBox.height,
+        class: d.class,
+        confidence: d.confidence
+      }))
     };
 
-    const { data: alert } = await supabase
-      .from('alerts')
-      .insert([alertData])
+    const { data: pendingAlert } = await supabase
+      .from('pending_alerts')
+      .insert([{
+        stream_id: stream.id,
+        detection_data: detectionData,
+        frame_timestamp: detectionResult.timestamp.toISOString(),
+        confidence: detectionResult.confidence,
+        status: 'pending'
+      }])
       .select()
       .single();
 
-    io.emit('accident-detected', {
-      alert,
-      stream: updatedStream,
+    io.emit('accident-detected-pending', {
+      pendingAlert,
+      stream,
       detectionResult
     });
 
-    console.log(`Accident detected at ${stream.location}`);
+    console.log(`Accident detected at ${stream.location} - awaiting approval`);
 
   } catch (error) {
     console.error('Error handling accident detection:', error);
