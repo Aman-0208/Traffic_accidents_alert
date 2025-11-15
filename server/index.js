@@ -9,6 +9,7 @@ import http from 'http';
 import streamRoutes from './routes/streams.js';
 import alertRoutes from './routes/alerts.js';
 import mlRoutes from './routes/ml.js';
+import pendingAlertRoutes from './routes/pending-alerts.js';
 
 // Import ML service
 import MLService from './services/mlService.js';
@@ -77,6 +78,7 @@ app.use((req, res, next) => {
 // Routes
 app.use('/api/streams', streamRoutes);
 app.use('/api/alerts', alertRoutes);
+app.use('/api/pending-alerts', pendingAlertRoutes);
 app.use('/api/ml', mlRoutes);
 
 // Health check endpoint

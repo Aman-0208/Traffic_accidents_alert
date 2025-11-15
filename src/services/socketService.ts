@@ -88,6 +88,12 @@ class SocketService {
     }
   }
 
+  onPendingAlertCreated(callback: (data: any) => void) {
+    if (this.socket) {
+      this.socket.on('pending-alert-created', callback);
+    }
+  }
+
   // Alert events
   onAlertSent(callback: (alert: any) => void) {
     if (this.socket) {
@@ -107,10 +113,17 @@ class SocketService {
     }
   }
 
+  // Generic on listener for any event
+  on(event: string, callback: Function) {
+    if (this.socket) {
+      this.socket.on(event, callback as any);
+    }
+  }
+
   // Remove event listeners
   off(event: string, callback?: Function) {
     if (this.socket) {
-      this.socket.off(event, callback);
+      this.socket.off(event, callback as any);
     }
   }
 
